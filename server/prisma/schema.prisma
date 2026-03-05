@@ -1,0 +1,249 @@
+// This is your Prisma schema file
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ==================== USER MODELS ====================
+
+model User {
+  id           String    @id @default(uuid())
+  email        String    @unique
+  passwordHash String
+  name         String
+  phone        String?
+  role         UserRole  @default(USER)
+  isVerified   Boolean   @default(false)
+  ageVerified  Boolean   @default(false)
+  dateOfBirth  DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  orders       Order[]
+  addresses    Address[]
+  reviews      Review[]
+  cart         Cart?
+}
+
+enum UserRole {
+  USER
+  ADMIN
+  MODERATOR
+}
+
+model Address {
+  id        String  @id @default(uuid())
+  userId    String
+  user      User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name      String  // e.g., "Home", "Work"
+  firstName String
+  lastName  String
+  address1  String
+  address2  String?
+  city      String
+  state     String
+  zip       String
+  country   String  @default("US")
+  phone     String?
+  isDefault Boolean @default(false)
+  createdAt DateTime @default(now())
+
+  ordersShipped Order[] @relation("OrderShippingAddress")
+  ordersBilled  Order[] @relation("OrderBillingAddress")
+}
+
+// ==================== PRODUCT MODELS ====================
+
+model Category {
+  id          String    @id @default(uuid())
+  name        String    @unique
+  slug        String    @unique
+  description String?
+  icon        String?
+  image       String?
+  parentId    String?
+  parent      Category? @relation("CategoryHierarchy", fields: [parentId], references: [id])
+  children    Category[] @relation("CategoryHierarchy")
+  products    Product[]
+  createdAt   DateTime  @default(now())
+}
+
+model Product {
+  id              String   @id @default(uuid())
+  name            String
+  slug            String   @unique
+  description     String   @db.Text
+  categoryId      String?
+  category        Category? @relation(fields: [categoryId], references: [id])
+  brand          String
+  images          String[] // Array of image URLs
+  price           Float
+  comparePrice    Float?
+  costPrice       Float?   // For profit calculation
+  inStock         Boolean  @default(true)
+  stock           Int      @default(0)
+  sku             String?  @unique
+  weight          Float?   // In grams
+  isFeatured      Boolean  @default(false)
+  isOnSale        Boolean  @default(false)
+  isActive        Boolean  @default(true)
+  
+  // Variants
+  nicotineLevels  String[] // ["0mg", "3mg", "5mg"]
+  flavors         String[] // ["Watermelon", "Mango"]
+  colors          String[] // For hardware
+  
+  // SEO
+  metaTitle       String?
+  metaDescription String?
+  
+  // Stats
+  rating          Float    @default(0)
+  reviewCount     Int      @default(0)
+  viewCount       Int      @default(0)
+  soldCount       Int      @default(0)
+  
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  orderItems      OrderItem[]
+  cartItems       CartItem[]
+  reviews         Review[]
+}
+
+model Review {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  productId String
+  product   Product  @relation(fields: [productId], references: [id])
+  rating    Int      // 1-5
+  title     String?
+  content   String?  @db.Text
+  isVerified Boolean @default(false) // Verified purchase
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, productId])
+}
+
+// ==================== CART & ORDER MODELS ====================
+
+model Cart {
+  id        String     @id @default(uuid())
+  userId    String     @unique
+  user      User       @relation(fields: [userId], references: [id])
+  items     CartItem[]
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+}
+
+model CartItem {
+  id        String  @id @default(uuid())
+  cartId    String
+  cart      Cart    @relation(fields: [cartId], references: [id], onDelete: Cascade)
+  productId String
+  product   Product @relation(fields: [productId], references: [id])
+  quantity  Int     @default(1)
+  variant   String? // Selected flavor, nicotine, color
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([cartId, productId, variant])
+}
+
+model Order {
+  id              String        @id @default(uuid())
+  orderNumber     String        @unique // e.g., "HV-2026-001234"
+  userId          String
+  user            User          @relation(fields: [userId], references: [id])
+  status          OrderStatus   @default(PENDING)
+  
+  // Financials
+  subtotal        Float
+  tax             Float         @default(0)
+  shipping        Float         @default(0)
+  discount        Float         @default(0)
+  total           Float
+  
+  // Addresses
+  shippingAddressId String?
+  shippingAddress  Address?    @relation("OrderShippingAddress", fields: [shippingAddressId], references: [id])
+  billingAddressId  String?
+  billingAddress   Address?    @relation("OrderBillingAddress", fields: [billingAddressId], references: [id])
+  
+  // Payment
+  paymentMethod   String?
+  paymentStatus   PaymentStatus @default(PENDING)
+  paymentId       String?      // Stripe payment ID
+  paidAt          DateTime?
+  
+  // Shipping
+  trackingNumber  String?
+  shippedAt       DateTime?
+  deliveredAt     DateTime?
+  
+  // Notes
+  notes           String?      @db.Text
+  
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+
+  items           OrderItem[]
+}
+
+model OrderItem {
+  id          String  @id @default(uuid())
+  orderId     String
+  order       Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  productId   String
+  product     Product @relation(fields: [productId], references: [id])
+  productName String  // Snapshot of name at time of order
+  productImage String? // Snapshot of image
+  quantity    Int
+  price       Float   // Price at time of order
+  variant     String? // Selected variant
+  createdAt   DateTime @default(now())
+}
+
+enum OrderStatus {
+  PENDING
+  CONFIRMED
+  PROCESSING
+  SHIPPED
+  DELIVERED
+  CANCELLED
+  REFUNDED
+}
+
+enum PaymentStatus {
+  PENDING
+  PAID
+  FAILED
+  REFUNDED
+}
+
+// ==================== AGE VERIFICATION ====================
+
+model AgeVerification {
+  id          String   @id @default(uuid())
+  ipAddress   String
+  userAgent   String?
+  verified    Boolean
+  createdAt   DateTime @default(now())
+}
+
+// ==================== SETTINGS ====================
+
+model Setting {
+  id        String   @id @default(uuid())
+  key       String   @unique
+  value     String   @db.Text
+  type      String   @default("string") // string, number, boolean, json
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
